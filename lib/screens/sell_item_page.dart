@@ -1,9 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../models/listing_draft.dart';
+import '../repositories/listing_draft_repository.dart';
+import 'my_drafts_page.dart';
 
 class SellItemPage extends StatefulWidget {
-  const SellItemPage({super.key});
+  final ListingDraftRepository draftRepository;
+  const SellItemPage({super.key, required this.draftRepository});
 
   @override
   State<SellItemPage> createState() => _SellItemPageState();
@@ -17,6 +21,8 @@ class _SellItemPageState extends State<SellItemPage> {
   final _titleController = TextEditingController();
   final _categoryController = TextEditingController();
   final _descriptionController = TextEditingController();
+
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -63,9 +69,13 @@ class _SellItemPageState extends State<SellItemPage> {
     );
   }
 
-  // ฟังก์ชันยืนยันร่างประกาศ และ Reset ฟอร์ม (ส่วนที่ 5.2)
-  void _confirmListing() {
-    if (_titleController.text.trim().isEmpty) {
+  // ฟังก์ชันยืนยันร่างประกาศ บันทึกลง Drift ฐานข้อมูลถาวร
+  Future<void> _confirmListing() async {
+    final title = _titleController.text.trim();
+    final category = _categoryController.text.trim();
+    final description = _descriptionController.text.trim();
+
+    if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('กรุณากรอกหรือตรวจสอบชื่อสินค้าก่อนยืนยัน'),
@@ -75,28 +85,67 @@ class _SellItemPageState extends State<SellItemPage> {
       return;
     }
 
-    // แสดง SnackBar สีเขียว ยืนยันสำเร็จ
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('บันทึกร่างประกาศเรียบร้อยแล้ว'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 3),
-      ),
+    final imagePath = _imageFile?.path ?? '';
+    final draft = ListingDraft(
+      title: title,
+      category: category.isNotEmpty ? category : 'ทั่วไป',
+      description: description,
     );
 
-    // ล้างค่าในฟอร์มทั้งหมดเตรียมลงประกาศใหม่
-    setState(() {
-      _imageFile = null;
-      _titleController.clear();
-      _categoryController.clear();
-      _descriptionController.clear();
-    });
+    setState(() => _isSaving = true);
+
+    try {
+      await widget.draftRepository.saveDraft(draft, imagePath);
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('บันทึกร่างประกาศเรียบร้อยแล้ว'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      // ล้างค่าในฟอร์มทั้งหมดเตรียมลงประกาศใหม่
+      setState(() {
+        _imageFile = null;
+        _titleController.clear();
+        _categoryController.clear();
+        _descriptionController.clear();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('เกิดข้อผิดพลาดในการบันทึกร่าง: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ลงประกาศขาย')),
+      appBar: AppBar(
+        title: const Text('ลงประกาศขาย'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'ร่างประกาศของฉัน',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MyDraftsPage(repository: widget.draftRepository),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -143,7 +192,7 @@ class _SellItemPageState extends State<SellItemPage> {
             ),
             const SizedBox(height: 8),
 
-            // ปุ่มให้ AI ช่วยแนะนำ (กดปุ๊บ เด้ง Error สีแดงทันที)
+            // ปุ่มให้ AI ช่วยแนะนำ
             ElevatedButton.icon(
               onPressed: _triggerMockSafetyError,
               icon: const Icon(Icons.auto_awesome),
@@ -192,9 +241,15 @@ class _SellItemPageState extends State<SellItemPage> {
 
             // ปุ่มยืนยันร่างประกาศ
             ElevatedButton.icon(
-              onPressed: _confirmListing,
-              icon: const Icon(Icons.check_circle),
-              label: const Text('ยืนยันร่างประกาศ'),
+              onPressed: _isSaving ? null : _confirmListing,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.check_circle),
+              label: Text(_isSaving ? 'กำลังบันทึก...' : 'ยืนยันร่างประกาศ'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
