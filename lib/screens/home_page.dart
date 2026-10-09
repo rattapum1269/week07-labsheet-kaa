@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/item.dart';
@@ -6,13 +7,15 @@ import '../repositories/item_repository.dart';
 import '../repositories/favorites_repository.dart';
 import 'checkout_page.dart';
 
+import '../services/auth_service.dart';
+
 class HomePage extends StatefulWidget {
-  final ItemRepository repository;
+  final List<ItemRepository> repositories;
   final FavoritesRepository favoritesRepository;
 
   const HomePage({
     super.key,
-    required this.repository,
+    required this.repositories,
     required this.favoritesRepository,
   });
 
@@ -26,7 +29,13 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _itemsFuture = widget.repository.getItems();
+    _loadItems();
+  }
+
+  void _loadItems() {
+    _itemsFuture = Future.wait(widget.repositories.map((r) => r.getItems())).then(
+      (lists) => lists.expand((x) => x).toList(),
+    );
   }
 
   @override
@@ -44,6 +53,13 @@ class _HomePageState extends State<HomePage> {
               context,
               MaterialPageRoute(builder: (_) => const CheckoutPage()),
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'ออกจากระบบ',
+            onPressed: () async {
+              await AuthService().signOut();
+            },
           ),
         ],
       ),
@@ -64,17 +80,46 @@ class _HomePageState extends State<HomePage> {
             itemCount: items.length,
             itemBuilder: (context, index) {
               final item = items[index];
+              final isStudentListing = item.imageUrl.startsWith('http') && item.imageUrl.contains('firebasestorage') || item.category == 'campus' || item.id > 10000;
               return ListTile(
-                leading: Image.network(
-                  item.imageUrl,
+                leading: SizedBox(
                   width: 48,
                   height: 48,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Icon(Icons.broken_image),
+                  child: item.imageUrl.startsWith('http')
+                      ? Image.network(
+                          item.imageUrl,
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Icon(Icons.broken_image),
+                        )
+                      : (item.imageUrl.isNotEmpty && File(item.imageUrl).existsSync()
+                          ? Image.file(
+                              File(item.imageUrl),
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Icon(Icons.broken_image),
+                            )
+                          : const Icon(Icons.broken_image)),
                 ),
-                title: Text(item.title),
-                subtitle: Text('${item.price} บาท'),
+                title: Row(
+                  children: [
+                    Text(
+                      isStudentListing ? '🎓 ' : '🏪 ',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                subtitle: Text('${item.price} บาท • ${isStudentListing ? "โพสต์โดยนักศึกษา" : "สินค้าจากร้านค้า"}'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
